@@ -1,0 +1,77 @@
+version: '3'
+
+networks:
+  mlflow-network:
+
+services:
+  mlflow-db:
+    platform: linux/x86_64
+    container_name: mlflow-db
+    image: mysql
+    restart: always
+    command: --default-authentication-plugin=mysql_native_password
+    networks:
+      - mlflow-network
+    expose:
+      - "3306"
+    environment:
+      - MYSQL_DATABASE=mlflow
+      - MYSQL_USER=mlflow
+      - MYSQL_PASSWORD=mlflow123
+      - MYSQL_ROOT_PASSWORD=root123
+    volumes:
+      - type: bind
+        source: /home/mlflow/data/db # TODO: Update this path to an existing path
+        target: /var/lib/mysql
+    cap_add:
+      - SYS_NICE
+
+  mlflow-db-adminer:
+    platform: linux/x86_64
+    container_name: mlflow-db-adminer
+    image: adminer
+    restart: always
+    networks:
+      - mlflow-network
+    depends_on:
+      - mlflow-db
+    ports:
+      - "8080:8080"
+
+  mlflow-minio:
+    platform: linux/x86_64
+    container_name: mlflow-minio
+    image: minio/minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ACCESS_KEY=mlflow_artifacts
+      - MINIO_SECRET_KEY=mlflow_artifacts_secret
+    volumes:
+      - type: bind
+        source: /home/mlflow/data/artifacts # TODO: Update this path to an existing path
+        target: /data
+    command: minio server /data --console-address ":9001"
+    networks:
+      - mlflow-network
+
+  mlflow:
+    platform: linux/x86_64
+    container_name: mlflow
+    build: ./mlflow
+    image: mlflow
+    restart: always
+    depends_on:
+      - mlflow-db
+      - mlflow-minio
+    ports:
+      - "5000:5000"
+    networks:
+      - mlflow-network
+    environment:
+      - AWS_ACCESS_KEY_ID=mlflow_artifacts
+      - AWS_SECRET_ACCESS_KEY=mlflow_artifacts_secret
+      - MLFLOW_S3_ENDPOINT_URL=http://mlflow-minio:9000
+      - MLFLOW_S3_IGNORE_TLS=true
+    command: mlflow server --backend-store-uri mysql+pymysql://mlflow:mlflow123@mlflow-db:3306/mlflow --default-artifact-root s3://ml/mlflow --host 0.0.0.0
